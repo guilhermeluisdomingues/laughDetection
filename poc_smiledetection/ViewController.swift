@@ -19,8 +19,10 @@ class ViewController: UIViewController {
     var pokerfacingMouth: [Double] = []
     var pokerfacingEye: [Double] = []
     
-    var isValidatingPokerFace = true
+    var isCalibratingPokerFace = true
     var isCalibrationDone = false
+    
+    var totalLaughs = 0
     
     @IBOutlet weak var calibrationState: UILabel!
     
@@ -49,10 +51,10 @@ class ViewController: UIViewController {
            }
        }
        
-    
     fileprivate func setupFaceTracking() {
         sceneView.session.run(configuration)
         sceneView.delegate = self
+        sceneView.session.delegate = self
         view.addSubview(sceneView)
     }
     
@@ -78,7 +80,9 @@ class ViewController: UIViewController {
         print("smileFactor: \(smileFactor)")
         print("=======================================")
 
-        //        UserDefaults.standard.set(smileFactor, forKey: "smile_factor")
+        UserDefaults.standard.set(smileFactorMouth, forKey: "mouthFactor")
+        UserDefaults.standard.set(smileFactorEye, forKey: "eyeFactor")
+        
         isCalibrationDone = true
     }
     
@@ -90,8 +94,50 @@ class ViewController: UIViewController {
         return sum / Double(array.count)
     }
     
+    fileprivate func updateMessageText(_ text: String) {
+        DispatchQueue.main.sync {
+             calibrationState.text = text
+        }
+       
+    }
+    
+    fileprivate func calibrateLaugh(mouthSmileValue: Double, eyeSquintValue: Double) {
+        if isCalibratingPokerFace {
+            if pokerfacingMouth.count < 100 {
+                pokerfacingMouth.append(mouthSmileValue)
+                pokerfacingEye.append(eyeSquintValue)
+                
+                updateMessageText("Calibrando pokerface.")
+                
+            } else {
+                updateMessageText("Calibração pausada.")
+            }
+        } else {
+            if laughingMouth.count < 100 {
+                laughingMouth.append(mouthSmileValue)
+                laughingEye.append(eyeSquintValue)
+                
+                updateMessageText("Calibrando sorisso.")
+            } else {
+                updateMessageText("Calibração concluídas")
+                
+                calculateSmileFactor()
+            }
+        }
+    }
+    
+    fileprivate func detectLaugh(mouthSmileValue: Double, eyeSquintValue: Double) {
+        let mouthFactor = UserDefaults.standard.double(forKey: "mouthFactor")
+        let eyeFactor = UserDefaults.standard.double(forKey: "eyeFactor")
+        
+        if mouthSmileValue >= mouthFactor && eyeSquintValue >= eyeFactor {
+            totalLaughs += 1
+            updateMessageText("Você riu \(totalLaughs) vezes!")
+        }
+    }
+    
     @IBAction func toogleCalibration(_ sender: Any) {
-        isValidatingPokerFace = !isValidatingPokerFace
+        isCalibratingPokerFace = !isCalibratingPokerFace
     }
     
     @IBAction func reDoCalibration(_ sender: Any) {
@@ -101,57 +147,51 @@ class ViewController: UIViewController {
         laughingMouth.removeAll()
         
         isCalibrationDone = false
-        isValidatingPokerFace = true
+        isCalibratingPokerFace = true
+        totalLaughs = 0
+        
+        UserDefaults.standard.removeObject(forKey: "mouthFactor")
+        UserDefaults.standard.removeObject(forKey: "eyeFactor")
     }
 }
 
-extension ViewController: ARSCNViewDelegate {
-    
-    fileprivate func updateCalibrationState(_ text: String) {
-        DispatchQueue.main.sync {
-             calibrationState.text = text
-        }
-       
-    }
-    
+extension ViewController: ARSCNViewDelegate, ARSessionDelegate {
+
     func renderer(_ renderer: SCNSceneRenderer, didUpdate node: SCNNode, for anchor: ARAnchor) {
-        guard let faceAnchor = anchor as? ARFaceAnchor else {return}
-        
-        guard !isCalibrationDone else { return }
+        guard let faceAnchor = anchor as? ARFaceAnchor else { return }
         
         let leftSmileValue = faceAnchor.blendShapes[.mouthSmileLeft] as! Double
         let rightSmileValue = faceAnchor.blendShapes[.mouthSmileRight] as! Double
         let leftSquintValue = faceAnchor.blendShapes[.eyeSquintLeft] as! Double
         let rightSquintValue = faceAnchor.blendShapes[.eyeSquintRight] as! Double
         
-        if isValidatingPokerFace {
-            if pokerfacingMouth.count < 100 {
-                let mouthSmileValue = Double(leftSmileValue + rightSmileValue) / 2.0
-                pokerfacingMouth.append(mouthSmileValue)
-                
-                let eyeSquintValue = Double(leftSquintValue + rightSquintValue) / 2.0
-                pokerfacingEye.append(eyeSquintValue)
-                
-                updateCalibrationState("Calibrando pokerface.")
-                
-            } else {
-                updateCalibrationState("Calibração pausada.")
-            }
+        let mouthSmileValue = Double(leftSmileValue + rightSmileValue) / 2.0
+        let eyeSquintValue = Double(leftSquintValue + rightSquintValue) / 2.0
+        
+        if isCalibrationDone {
+            detectLaugh(mouthSmileValue: mouthSmileValue, eyeSquintValue: eyeSquintValue)
         } else {
-            if laughingMouth.count < 100 {
-                let mouthSmileValue = Double(leftSmileValue + rightSmileValue) / 2.0
-                laughingMouth.append(mouthSmileValue)
-                
-                let eyeSquintValue = Double(leftSquintValue + rightSquintValue) / 2.0
-                laughingEye.append(eyeSquintValue)
-                                
-                updateCalibrationState("Calibrando sorisso.")
-            } else {
-                updateCalibrationState("Calibração concluídas")
-                
-                calculateSmileFactor()
-            }
+            calibrateLaugh(mouthSmileValue: mouthSmileValue, eyeSquintValue: eyeSquintValue)
         }
+    }
+    
+    func session(_ session: ARSession, didUpdate frame: ARFrame) {
+
+    }
+
+    func session(_ session: ARSession, cameraDidChangeTrackingState camera: ARCamera) {
+        switch camera.trackingState {
+        case .notAvailable:
+            updateMessageText("Tracking perdido!")
+        case .limited(.insufficientFeatures):
+            updateMessageText("Pouca luminosidade!")
+        default:
+            return
+        }
+    }
+    
+    fileprivate func handleTrackingError() {
+        updateMessageText("Tracking perdido!")
     }
 }
 
